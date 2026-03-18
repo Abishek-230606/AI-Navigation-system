@@ -39,6 +39,7 @@ class GridUI:
             "DFS": [],
         }
 
+        self.animation_job = None
         self.last_paths = {"A*": None, "BFS": None, "DFS": None}
         self.status_var = tk.StringVar(value="Select the start cell.")
         self.best_algo_var = tk.StringVar(value="Best Algorithm: Waiting...")
@@ -322,6 +323,8 @@ class GridUI:
             self.buttons.append(row_buttons)
 
     def reset_board(self):
+        self.stop_animation()
+
         for row in self.buttons:
             for button in row:
                 button.destroy()
@@ -365,6 +368,9 @@ class GridUI:
 
     def find_path(self):
         if self.start and self.goal:
+            self.stop_animation()
+            self.clear_path_markers()
+
             path_astar = a_star(self.start, self.goal, self.obstacles, self.size)
             path_bfs = bfs(self.start, self.goal, self.obstacles, self.size)
             path_dfs = dfs(self.start, self.goal, self.obstacles, self.size)
@@ -430,7 +436,6 @@ class GridUI:
                 f"Best Algorithm: {best_algo}\nBest Path Length: {best_len} | Risk: {best_risk}"
             )
             self.status_var.set(f"{best_algo} found the best route. Animating path now...")
-            self.show_path(best_path)
             self.animate_path(best_path)
 
     def view_path(self, algo_name):
@@ -440,7 +445,7 @@ class GridUI:
             self.status_var.set(f"{algo_name} did not find a path.")
             return
 
-        # clear any previous temporary markers
+        self.stop_animation()
         self.clear_path_markers()
         self.status_var.set(f"Animating path from {algo_name}...")
         self.animate_path(path)
@@ -461,6 +466,11 @@ class GridUI:
                 lines.append(f"{algo}: -")
         return "\n".join(lines)
 
+    def stop_animation(self):
+        if self.animation_job is not None:
+            self.root.after_cancel(self.animation_job)
+            self.animation_job = None
+
     def animate_path(self, path, index=0):
         if index < len(path):
             row, col = path[index]
@@ -468,6 +478,9 @@ class GridUI:
             if (row, col) not in (self.start, self.goal):
                 self.buttons[row][col].config(bg=self.colors["path"], fg="white", text="*")
 
-            self.root.after(400, lambda: self.animate_path(path, index + 1))
+            self.animation_job = self.root.after(
+                400, lambda: self.animate_path(path, index + 1)
+            )
         else:
+            self.animation_job = None
             self.status_var.set("Path animation complete. Press Reset Board to try another run.")
