@@ -1,7 +1,7 @@
 import random
 import tkinter as tk
 
-from logic.search import a_star, bfs, dfs
+from logic.search import a_star, bfs, dfs, calculate_risk
 
 
 class GridUI:
@@ -364,77 +364,74 @@ class GridUI:
         self.status_var.set("Start and goal are already selected. Press Reset Board to try again.")
 
     def find_path(self):
-        if self.start is None or self.goal is None:
-            return
+        if self.start and self.goal:
+            path_astar = a_star(self.start, self.goal, self.obstacles, self.size)
+            path_bfs = bfs(self.start, self.goal, self.obstacles, self.size)
+            path_dfs = dfs(self.start, self.goal, self.obstacles, self.size)
 
-        path_astar = a_star(self.start, self.goal, self.obstacles, self.size)
-        path_bfs = bfs(self.start, self.goal, self.obstacles, self.size)
-        path_dfs = dfs(self.start, self.goal, self.obstacles, self.size)
+            self.last_paths["A*"] = path_astar
+            self.last_paths["BFS"] = path_bfs
+            self.last_paths["DFS"] = path_dfs
 
-        # store latest paths for viewing
-        self.last_paths["A*"] = path_astar
-        self.last_paths["BFS"] = path_bfs
-        self.last_paths["DFS"] = path_dfs
+            print("\n--- Agent Results ---")
 
-        if path_astar:
-            self.performance["A*"].append(len(path_astar))
-        if path_bfs:
-            self.performance["BFS"].append(len(path_bfs))
-        if path_dfs:
-            self.performance["DFS"].append(len(path_dfs))
+            results = []
+            result_lines = []
 
-        self.results_var.set(
-            "\n".join(
-                [
-                    f"A*: {'Path length ' + str(len(path_astar)) if path_astar else 'Failed'}",
-                    f"BFS: {'Path length ' + str(len(path_bfs)) if path_bfs else 'Failed'}",
-                    f"DFS: {'Path length ' + str(len(path_dfs)) if path_dfs else 'Failed'}",
-                ]
+            if path_astar:
+                risk = calculate_risk(path_astar, self.obstacles, self.size)
+                results.append(("A*", path_astar, len(path_astar), risk))
+                self.performance["A*"].append(len(path_astar))
+                print(f"A*: Length={len(path_astar)}, Risk={risk}")
+                result_lines.append(f"A*: Length {len(path_astar)} | Risk {risk}")
+                self.view_astar_btn.config(state="normal")
+            else:
+                result_lines.append("A*: Failed")
+                self.view_astar_btn.config(state="disabled")
+
+            if path_bfs:
+                risk = calculate_risk(path_bfs, self.obstacles, self.size)
+                results.append(("BFS", path_bfs, len(path_bfs), risk))
+                self.performance["BFS"].append(len(path_bfs))
+                print(f"BFS: Length={len(path_bfs)}, Risk={risk}")
+                result_lines.append(f"BFS: Length {len(path_bfs)} | Risk {risk}")
+                self.view_bfs_btn.config(state="normal")
+            else:
+                result_lines.append("BFS: Failed")
+                self.view_bfs_btn.config(state="disabled")
+
+            if path_dfs:
+                risk = calculate_risk(path_dfs, self.obstacles, self.size)
+                results.append(("DFS", path_dfs, len(path_dfs), risk))
+                self.performance["DFS"].append(len(path_dfs))
+                print(f"DFS: Length={len(path_dfs)}, Risk={risk}")
+                result_lines.append(f"DFS: Length {len(path_dfs)} | Risk {risk}")
+                self.view_dfs_btn.config(state="normal")
+            else:
+                result_lines.append("DFS: Failed")
+                self.view_dfs_btn.config(state="disabled")
+
+            self.results_var.set("\n".join(result_lines))
+            self.learning_var.set(self.get_learning_summary())
+
+            if not results:
+                print("No path found")
+                self.best_algo_var.set("Best Algorithm: No path found")
+                self.status_var.set("No algorithm found a valid path.")
+                return
+
+            best = min(results, key=lambda x: (x[2], x[3]))
+            best_algo, best_path, best_len, best_risk = best
+
+            print(f"\nBest Algorithm: {best_algo}")
+            print(f"Best Path Length: {best_len}, Risk: {best_risk}")
+
+            self.best_algo_var.set(
+                f"Best Algorithm: {best_algo}\nBest Path Length: {best_len} | Risk: {best_risk}"
             )
-        )
-
-        paths = []
-        if path_astar:
-            paths.append(("A*", path_astar))
-        if path_bfs:
-            paths.append(("BFS", path_bfs))
-        if path_dfs:
-            paths.append(("DFS", path_dfs))
-
-        self.learning_var.set(self.get_learning_summary())
-
-        if not paths:
-            self.best_algo_var.set("Best Algorithm: No path found")
-            self.status_var.set("No algorithm found a valid path.")
-            # disable individual view buttons
-            self.view_astar_btn.config(state="disabled")
-            self.view_bfs_btn.config(state="disabled")
-            self.view_dfs_btn.config(state="disabled")
-            return
-
-        best_algo, best_path = min(paths, key=lambda item: len(item[1]))
-
-        self.best_algo_var.set(
-            f"Best Algorithm: {best_algo}\nBest Path Length: {len(best_path)}"
-        )
-        self.status_var.set(f"{best_algo} found the best route. Animating path now...")
-        # enable view buttons for algorithms that found a path
-        if path_astar:
-            self.view_astar_btn.config(state="normal")
-        else:
-            self.view_astar_btn.config(state="disabled")
-
-        if path_bfs:
-            self.view_bfs_btn.config(state="normal")
-        else:
-            self.view_bfs_btn.config(state="disabled")
-
-        if path_dfs:
-            self.view_dfs_btn.config(state="normal")
-        else:
-            self.view_dfs_btn.config(state="disabled")
-
-        self.animate_path(best_path)
+            self.status_var.set(f"{best_algo} found the best route. Animating path now...")
+            self.show_path(best_path)
+            self.animate_path(best_path)
 
     def view_path(self, algo_name):
         """Animate the path for a specific algorithm if available."""
