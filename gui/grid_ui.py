@@ -1,486 +1,668 @@
 import random
 import tkinter as tk
+from tkinter import ttk
+from tkinter.scrolledtext import ScrolledText
 
-from logic.search import a_star, bfs, dfs, calculate_risk
+from logic.agent import Agent
 
 
 class GridUI:
-    def __init__(self, root, size=4, obstacle_count=3):
+    CELL_COLORS = {
+        "empty": "#F1F5F9",
+        "obstacle": "#1E293B",
+        "start": "#10B981",
+        "goal": "#EF4444",
+        "trail": "#FDE047",
+        "current": "#0EA5E9",
+    }
+
+    def __init__(self, root, size=6):
         self.root = root
         self.size = size
-        self.obstacle_count = min(obstacle_count, (size * size) - 2)
-
-        self.colors = {
-            "bg": "#0f172a",
-            "panel": "#111827",
-            "panel_alt": "#1f2937",
-            "text": "#e5e7eb",
-            "muted": "#94a3b8",
-            "accent": "#22c55e",
-            "goal": "#ef4444",
-            "obstacle": "#020617",
-            "path": "#38bdf8",
-            "cell": "#e2e8f0",
-            "cell_text": "#0f172a",
-            "border": "#334155",
-            "warning": "#f59e0b",
-        }
-
-        self.root.configure(bg=self.colors["bg"])
-        self.root.title("AI Navigation System")
+        self.agent = Agent()
 
         self.buttons = []
+        self.obstacles = set()
         self.start = None
         self.goal = None
-        self.obstacles = set()
-        self.performance = {
-            "A*": [],
-            "BFS": [],
-            "DFS": [],
-        }
-
+        self.current = None
+        self.last_result = None
+        self.animation_index = 0
         self.animation_job = None
-        self.last_paths = {"A*": None, "BFS": None, "DFS": None}
-        self.status_var = tk.StringVar(value="Select the start cell.")
-        self.best_algo_var = tk.StringVar(value="Best Algorithm: Waiting...")
-        self.results_var = tk.StringVar(value="A*: -\nBFS: -\nDFS: -")
-        self.learning_var = tk.StringVar(
-            value="Learning Summary:\nA*: -\nBFS: -\nDFS: -"
+        self.path_history = []
+        self.decision_history = []
+
+        self.status_var = tk.StringVar()
+        self.selection_var = tk.StringVar()
+        self.algorithm_var = tk.StringVar()
+        self.summary_var = tk.StringVar()
+        self.goal_var = tk.StringVar()
+        self.step_var = tk.StringVar()
+
+        self._configure_root()
+        self._build_layout()
+        self._create_grid()
+        self._new_board()
+
+    def _configure_root(self):
+        self.root.configure(bg="#E2E8F0")
+        self.root.minsize(1450, 920)
+
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        style.configure("App.TFrame", background="#E2E8F0")
+        style.configure("Panel.TFrame", background="#FFFFFF")
+        style.configure("SoftPanel.TFrame", background="#F8FAFC")
+        style.configure(
+            "Title.TLabel",
+            background="#E2E8F0",
+            foreground="#0F172A",
+            font=("Segoe UI Semibold", 30),
+        )
+        style.configure(
+            "Subtitle.TLabel",
+            background="#E2E8F0",
+            foreground="#475569",
+            font=("Segoe UI", 15),
+        )
+        style.configure(
+            "PanelTitle.TLabel",
+            background="#FFFFFF",
+            foreground="#0F172A",
+            font=("Segoe UI Semibold", 18),
+        )
+        style.configure(
+            "PanelText.TLabel",
+            background="#FFFFFF",
+            foreground="#475569",
+            font=("Segoe UI", 13),
+        )
+        style.configure(
+            "SectionHint.TLabel",
+            background="#FFFFFF",
+            foreground="#64748B",
+            font=("Segoe UI", 11),
+        )
+        style.configure(
+            "Status.TLabel",
+            background="#FFFFFF",
+            foreground="#1E293B",
+            font=("Segoe UI Semibold", 14),
+        )
+        style.configure(
+            "DecisionHero.TLabel",
+            background="#F8FAFC",
+            foreground="#0284C7",
+            font=("Segoe UI Semibold", 22),
+        )
+        style.configure(
+            "DecisionMeta.TLabel",
+            background="#F8FAFC",
+            foreground="#475569",
+            font=("Segoe UI", 13),
+        )
+        style.configure(
+            "Primary.TButton",
+            font=("Segoe UI Semibold", 12),
+            padding=(16, 11),
+        )
+        style.configure(
+            "Summary.TButton",
+            font=("Segoe UI Semibold", 10),
+            padding=(8, 6),
+        )
+        style.configure(
+            "MetricValue.TLabel",
+            background="#F8FAFC",
+            foreground="#0F172A",
+            font=("Segoe UI Semibold", 18),
+        )
+        style.configure(
+            "MetricLabel.TLabel",
+            background="#F8FAFC",
+            foreground="#64748B",
+            font=("Segoe UI", 11),
         )
 
-        self.build_layout()
-        self.create_grid()
+    def _build_layout(self):
+        self.container = ttk.Frame(self.root, style="App.TFrame", padding=30)
+        self.container.pack(fill="both", expand=True)
 
-    def build_layout(self):
-        self.main_frame = tk.Frame(self.root, bg=self.colors["bg"], padx=20, pady=20)
-        self.main_frame.pack(fill="both", expand=True)
+        header = ttk.Frame(self.container, style="App.TFrame")
+        header.pack(fill="x", pady=(0, 22))
 
-        self.header_frame = tk.Frame(self.main_frame, bg=self.colors["bg"])
-        self.header_frame.pack(fill="x", pady=(0, 16))
+        ttk.Label(
+            header,
+            text="AI Navigation Simulator",
+            style="Title.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            header,
+            text="Select a start cell, then a goal cell. The agent compares DFS, BFS and A* before animating the chosen path.",
+            style="Subtitle.TLabel",
+            wraplength=1400,
+            justify="left",
+        ).pack(anchor="w", pady=(8, 0))
 
-        title_label = tk.Label(
-            self.header_frame,
-            text="AI Navigation System",
-            font=("Segoe UI", 20, "bold"),
-            fg=self.colors["text"],
-            bg=self.colors["bg"],
+        body = ttk.Frame(self.container, style="App.TFrame")
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=7)
+        body.columnconfigure(1, weight=15)
+        body.columnconfigure(2, weight=17)
+        body.rowconfigure(0, weight=1)
+
+        self.grid_card = ttk.Frame(body, style="Panel.TFrame", padding=24)
+        self.grid_card.grid(row=0, column=0, sticky="nsew", padx=(0, 22))
+        self.grid_card.columnconfigure(0, weight=1)
+        self.grid_card.rowconfigure(2, weight=1)
+
+        ttk.Label(self.grid_card, text="Grid World", style="PanelTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
-        title_label.pack(anchor="w")
-
-        subtitle_label = tk.Label(
-            self.header_frame,
-            text="Choose a start point and a goal point to compare A*, BFS, and DFS.",
-            font=("Segoe UI", 10),
-            fg=self.colors["muted"],
-            bg=self.colors["bg"],
-        )
-        subtitle_label.pack(anchor="w", pady=(4, 0))
-
-        self.content_frame = tk.Frame(self.main_frame, bg=self.colors["bg"])
-        self.content_frame.pack(fill="both", expand=True)
-
-        self.grid_card = tk.Frame(
-            self.content_frame,
-            bg=self.colors["panel"],
-            bd=0,
-            highlightthickness=1,
-            highlightbackground=self.colors["border"],
-            padx=18,
-            pady=18,
-        )
-        self.grid_card.pack(side="left", padx=(0, 16), fill="both")
-
-        grid_title = tk.Label(
+        ttk.Label(
             self.grid_card,
-            text="Grid",
-            font=("Segoe UI", 14, "bold"),
-            fg=self.colors["text"],
-            bg=self.colors["panel"],
+            text="Obstacle cells are blocked. The blue cell is the active simulation position.",
+            style="PanelText.TLabel",
+            wraplength=780,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(6, 16))
+
+        legend = ttk.Frame(self.grid_card, style="Panel.TFrame")
+        legend.grid(row=2, column=0, sticky="ew", pady=(0, 16))
+        for column in range(5):
+            legend.columnconfigure(column, weight=1)
+
+        self._build_legend_item(legend, 0, "Start", self.CELL_COLORS["start"])
+        self._build_legend_item(legend, 1, "Goal", self.CELL_COLORS["goal"])
+        self._build_legend_item(legend, 2, "Obstacle", self.CELL_COLORS["obstacle"])
+        self._build_legend_item(legend, 3, "Visited", self.CELL_COLORS["trail"])
+        self._build_legend_item(legend, 4, "Current", self.CELL_COLORS["current"])
+
+        self.grid_frame = tk.Frame(self.grid_card, bg="#FFFFFF")
+        self.grid_frame.grid(row=3, column=0, sticky="nsew")
+        self.grid_card.rowconfigure(3, weight=1)
+
+        self.decision_card = ttk.Frame(body, style="Panel.TFrame", padding=24)
+        self.decision_card.grid(row=0, column=1, sticky="nsew", padx=(0, 22))
+        self.decision_card.columnconfigure(0, weight=1)
+        self.decision_card.rowconfigure(3, weight=1)
+
+        ttk.Label(
+            self.decision_card,
+            text="Decision Agent",
+            style="PanelTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            self.decision_card,
+            text="Each step shows the selected algorithm, the chosen next move, and the reasoning behind it.",
+            style="SectionHint.TLabel",
+            wraplength=430,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(6, 16))
+
+        hero = ttk.Frame(self.decision_card, style="SoftPanel.TFrame", padding=16)
+        hero.grid(row=2, column=0, sticky="ew", pady=(0, 16))
+        hero.columnconfigure(0, weight=1)
+
+        ttk.Label(
+            hero,
+            textvariable=self.algorithm_var,
+            style="DecisionHero.TLabel",
+            wraplength=390,
+            justify="left",
+        ).grid(row=0, column=0, sticky="ew")
+        ttk.Label(
+            hero,
+            textvariable=self.summary_var,
+            style="DecisionMeta.TLabel",
+            wraplength=390,
+            justify="left",
+        ).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+
+        self.decision_box = ScrolledText(
+            self.decision_card,
+            wrap="word",
+            font=("Segoe UI", 12),
+            bg="#F8FAFC",
+            fg="#1E293B",
+            relief="flat",
+            padx=16,
+            pady=16,
         )
-        grid_title.pack(anchor="w", pady=(0, 12))
-
-        self.grid_frame = tk.Frame(self.grid_card, bg=self.colors["panel"])
-        self.grid_frame.pack()
-
-        self.side_panel = tk.Frame(
-            self.content_frame,
-            bg=self.colors["panel_alt"],
-            bd=0,
-            highlightthickness=1,
-            highlightbackground=self.colors["border"],
-            padx=18,
-            pady=18,
-            width=280,
+        self.decision_box.grid(row=3, column=0, sticky="nsew")
+        self.decision_box.tag_configure(
+            "bold",
+            font=("Segoe UI Semibold", 13, "bold"),
+            foreground="#0F172A",
         )
-        self.side_panel.pack(side="right", fill="y")
-        self.side_panel.pack_propagate(False)
+        self.decision_box.config(state="disabled")
 
-        status_title = tk.Label(
-            self.side_panel,
-            text="Live Results",
-            font=("Segoe UI", 14, "bold"),
-            fg=self.colors["text"],
-            bg=self.colors["panel_alt"],
+        self.sidebar = ttk.Frame(body, style="App.TFrame")
+        self.sidebar.grid(row=0, column=2, sticky="nsew")
+        self.sidebar.columnconfigure(0, weight=1)
+        self.sidebar.rowconfigure(1, weight=1)
+
+        self.summary_card = ttk.Frame(self.sidebar, style="Panel.TFrame", padding=7)
+        self.summary_card.grid(row=0, column=0, sticky="ew", pady=(0, 22))
+        self.summary_card.columnconfigure(0, weight=1)
+
+        ttk.Label(
+            self.summary_card,
+            text="Simulation Summary",
+            style="PanelTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            self.summary_card,
+            text="Goal status, step count and the main controls stay here throughout the run.",
+            style="SectionHint.TLabel",
+            wraplength=320,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(3, 6))
+
+        metrics = ttk.Frame(self.summary_card, style="Panel.TFrame")
+        metrics.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        metrics.columnconfigure(0, weight=1)
+        metrics.columnconfigure(1, weight=1)
+
+        goal_card = ttk.Frame(metrics, style="SoftPanel.TFrame", padding=8)
+        goal_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        ttk.Label(goal_card, textvariable=self.goal_var, style="MetricValue.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
-        status_title.pack(anchor="w")
+        ttk.Label(goal_card, text="Goal", style="MetricLabel.TLabel").grid(
+            row=1, column=0, sticky="w"
+        )
 
-        self.status_label = tk.Label(
-            self.side_panel,
+        step_card = ttk.Frame(metrics, style="SoftPanel.TFrame", padding=8)
+        step_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        ttk.Label(step_card, textvariable=self.step_var, style="MetricValue.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(step_card, text="Steps", style="MetricLabel.TLabel").grid(
+            row=1, column=0, sticky="w"
+        )
+
+        ttk.Label(
+            self.summary_card,
             textvariable=self.status_var,
-            font=("Segoe UI", 10),
-            fg=self.colors["accent"],
-            bg=self.colors["panel_alt"],
+            style="Status.TLabel",
+            wraplength=320,
             justify="left",
-            wraplength=240,
-        )
-        self.status_label.pack(anchor="w", pady=(8, 14))
+        ).grid(row=3, column=0, sticky="ew", pady=(0, 8))
 
-        self.best_algo_label = tk.Label(
-            self.side_panel,
-            textvariable=self.best_algo_var,
-            font=("Segoe UI", 11, "bold"),
-            fg=self.colors["warning"],
-            bg=self.colors["panel_alt"],
+        ttk.Label(
+            self.summary_card,
+            textvariable=self.selection_var,
+            style="PanelText.TLabel",
             justify="left",
-            wraplength=240,
-        )
-        self.best_algo_label.pack(anchor="w", pady=(0, 14))
+        ).grid(row=4, column=0, sticky="w", pady=(0, 8))
 
-        results_title = tk.Label(
-            self.side_panel,
-            text="Algorithm Results",
-            font=("Segoe UI", 11, "bold"),
-            fg=self.colors["text"],
-            bg=self.colors["panel_alt"],
-        )
-        results_title.pack(anchor="w")
+        button_frame = ttk.Frame(self.summary_card, style="Panel.TFrame")
+        button_frame.grid(row=5, column=0, sticky="ew")
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=1)
+        button_frame.columnconfigure(2, weight=1)
 
-        self.results_label = tk.Label(
-            self.side_panel,
-            textvariable=self.results_var,
-            font=("Consolas", 10),
-            fg=self.colors["text"],
-            bg=self.colors["panel_alt"],
+        ttk.Button(
+            button_frame,
+            text="Run Again",
+            style="Summary.TButton",
+            command=self._rerun_simulation,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(
+            button_frame,
+            text="Reset Points",
+            style="Summary.TButton",
+            command=self._reset_points,
+        ).grid(row=0, column=1, sticky="ew", padx=4)
+        ttk.Button(
+            button_frame,
+            text="New Map",
+            style="Summary.TButton",
+            command=self._new_board,
+        ).grid(row=0, column=2, sticky="ew", padx=(4, 0))
+
+        self.path_card = ttk.Frame(self.sidebar, style="Panel.TFrame", padding=15)
+        self.path_card.grid(row=1, column=0, sticky="nsew")
+        self.path_card.columnconfigure(0, weight=1)
+        self.path_card.rowconfigure(2, weight=1)
+
+        ttk.Label(
+            self.path_card,
+            text="Algorithm Paths",
+            style="PanelTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            self.path_card,
+            text="Full routes generated by DFS, BFS and A* from the current cell.",
+            style="SectionHint.TLabel",
+            wraplength=320,
             justify="left",
-            anchor="w",
-        )
-        self.results_label.pack(anchor="w", pady=(8, 14), fill="x")
+        ).grid(row=1, column=0, sticky="w", pady=(6, 12))
 
-        learning_title = tk.Label(
-            self.side_panel,
-            text="Learning Summary",
-            font=("Segoe UI", 11, "bold"),
-            fg=self.colors["text"],
-            bg=self.colors["panel_alt"],
-        )
-        learning_title.pack(anchor="w")
-
-        self.learning_label = tk.Label(
-            self.side_panel,
-            textvariable=self.learning_var,
-            font=("Consolas", 10),
-            fg=self.colors["muted"],
-            bg=self.colors["panel_alt"],
-            justify="left",
-            anchor="w",
-        )
-        self.learning_label.pack(anchor="w", pady=(8, 16), fill="x")
-
-        self.reset_button = tk.Button(
-            self.side_panel,
-            text="Reset Board",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.colors["accent"],
-            fg="#052e16",
-            activebackground="#16a34a",
-            activeforeground="#ffffff",
+        self.path_box = ScrolledText(
+            self.path_card,
+            wrap="word",
+            font=("Consolas", 11),
+            bg="#F8FAFC",
+            fg="#1E293B",
             relief="flat",
             padx=12,
-            pady=8,
-            command=self.reset_board,
-            cursor="hand2",
+            pady=12,
         )
-        self.reset_button.pack(anchor="w")
+        self.path_box.grid(row=2, column=0, sticky="nsew")
+        self.path_box.config(state="disabled")
 
-        # Compare and view controls
-        self.compare_button = tk.Button(
-            self.side_panel,
-            text="Compare Algorithms",
-            font=("Segoe UI", 10, "bold"),
-            bg="#3b82f6",
-            fg="#ffffff",
-            activebackground="#2563eb",
-            relief="flat",
-            padx=10,
-            pady=8,
-            command=self.find_path,
-            cursor="hand2",
+    def _build_legend_item(self, parent, column, label, color):
+        item = ttk.Frame(parent, style="SoftPanel.TFrame", padding=10)
+        item.grid(row=0, column=column, sticky="ew", padx=4)
+
+        swatch = tk.Label(item, bg=color, width=2, height=1, relief="flat")
+        swatch.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        ttk.Label(item, text=label, style="MetricLabel.TLabel").grid(
+            row=0, column=1, sticky="w"
         )
-        self.compare_button.pack(anchor="w", pady=(10, 6))
 
-        btn_frame = tk.Frame(self.side_panel, bg=self.colors["panel_alt"])
-        btn_frame.pack(anchor="w", pady=(0, 12))
+    def _create_grid(self):
+        for row in range(self.size):
+            self.grid_frame.grid_rowconfigure(row, weight=1)
+            self.grid_frame.grid_columnconfigure(row, weight=1)
+            button_row = []
 
-        self.view_astar_btn = tk.Button(
-            btn_frame,
-            text="View A*",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.colors["panel"],
-            fg=self.colors["text"],
-            relief="flat",
-            padx=8,
-            pady=6,
-            command=lambda: self.view_path("A*"),
-            state="disabled",
-            cursor="hand2",
-        )
-        self.view_astar_btn.grid(row=0, column=0, padx=(0, 6))
-
-        self.view_bfs_btn = tk.Button(
-            btn_frame,
-            text="View BFS",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.colors["panel"],
-            fg=self.colors["text"],
-            relief="flat",
-            padx=8,
-            pady=6,
-            command=lambda: self.view_path("BFS"),
-            state="disabled",
-            cursor="hand2",
-        )
-        self.view_bfs_btn.grid(row=0, column=1, padx=(0, 6))
-
-        self.view_dfs_btn = tk.Button(
-            btn_frame,
-            text="View DFS",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.colors["panel"],
-            fg=self.colors["text"],
-            relief="flat",
-            padx=8,
-            pady=6,
-            command=lambda: self.view_path("DFS"),
-            state="disabled",
-            cursor="hand2",
-        )
-        self.view_dfs_btn.grid(row=0, column=2)
-
-        # Legend
-        legend_frame = tk.Frame(self.side_panel, bg=self.colors["panel_alt"])
-        legend_frame.pack(anchor="w", pady=(6, 0), fill="x")
-
-        def legend_item(parent, color, text):
-            f = tk.Frame(parent, bg=self.colors["panel_alt"])
-            c = tk.Label(f, bg=color, width=2, height=1, bd=0)
-            c.pack(side="left", padx=(0, 6))
-            l = tk.Label(f, text=text, fg=self.colors["muted"], bg=self.colors["panel_alt"], font=("Segoe UI", 9))
-            l.pack(side="left")
-            return f
-
-        legend_item(legend_frame, self.colors["accent"], "Start (S)").pack(side="left", padx=(0,8))
-        legend_item(legend_frame, self.colors["goal"], "Goal (G)").pack(side="left", padx=(0,8))
-        legend_item(legend_frame, self.colors["obstacle"], "Obstacle (X)").pack(side="left", padx=(0,8))
-        legend_item(legend_frame, self.colors["path"], "Path (*)").pack(side="left")
-    def generate_obstacles(self):
-        while len(self.obstacles) < self.obstacle_count:
-            row = random.randint(0, self.size - 1)
-            col = random.randint(0, self.size - 1)
-            self.obstacles.add((row, col))
-
-    def create_grid(self):
-        self.generate_obstacles()
-
-        for row_index in range(self.size):
-            row_buttons = []
-            for col_index in range(self.size):
+            for col in range(self.size):
                 button = tk.Button(
                     self.grid_frame,
-                    text="",
-                    width=6,
-                    height=3,
-                    font=("Segoe UI", 11, "bold"),
-                    bg=self.colors["cell"],
-                    fg=self.colors["cell_text"],
-                    activebackground="#cbd5e1",
+                    text=f"{row},{col}",
+                    font=("Segoe UI Semibold", 13),
+                    width=8,
+                    height=4,
+                    bg=self.CELL_COLORS["empty"],
+                    fg="#475569",
+                    activebackground="#CBD5E1",
                     relief="flat",
                     bd=0,
-                    cursor="hand2",
-                    command=lambda r=row_index, c=col_index: self.on_click(r, c),
+                    highlightthickness=0,
+                    command=lambda r=row, c=col: self.on_click(r, c),
                 )
+                button.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+                button_row.append(button)
 
-                if (row_index, col_index) in self.obstacles:
-                    button.config(
-                        bg=self.colors["obstacle"],
-                        state="disabled",
-                        disabledforeground="#ffffff",
-                        text="X",
-                    )
+            self.buttons.append(button_row)
 
-                button.grid(row=row_index, column=col_index, padx=4, pady=4)
-                row_buttons.append(button)
-
-            self.buttons.append(row_buttons)
-
-    def reset_board(self):
-        self.stop_animation()
-
-        for row in self.buttons:
-            for button in row:
-                button.destroy()
-
-        self.buttons = []
+    def _new_board(self):
+        self._cancel_animation()
         self.start = None
         self.goal = None
-        self.obstacles = set()
-        self.last_paths = {"A*": None, "BFS": None, "DFS": None}
+        self.current = None
+        self.last_result = None
+        self.animation_index = 0
+        self.path_history = []
+        self.decision_history = []
+        self.obstacles = self._generate_obstacles()
+        self._update_selection_text()
+        self._set_status("Choose a start cell to begin the simulation.")
+        self.algorithm_var.set("Waiting for start and goal")
+        self.summary_var.set("The chosen algorithm and next move will be shown here.")
+        self.goal_var.set("Not reached")
+        self.step_var.set("0")
+        self._write_text(
+            self.path_box,
+            "Paths for DFS, BFS and A* will appear here after you choose the goal.",
+        )
+        self._write_text(
+            self.decision_box,
+            [("Choose start and goal to begin.", "")],
+        )
+        self._refresh_grid()
 
-        self.results_var.set("A*: -\nBFS: -\nDFS: -")
-        self.best_algo_var.set("Best Algorithm: Waiting...")
-        self.learning_var.set(self.get_learning_summary())
-        self.status_var.set("Select the start cell.")
+    def _reset_points(self):
+        self._cancel_animation()
+        self.start = None
+        self.goal = None
+        self.current = None
+        self.last_result = None
+        self.animation_index = 0
+        self.path_history = []
+        self.decision_history = []
+        self._update_selection_text()
+        self._set_status("Start and goal cleared. Choose a new start cell.")
+        self.algorithm_var.set("Waiting for start and goal")
+        self.summary_var.set("The chosen algorithm and next move will be shown here.")
+        self.goal_var.set("Not reached")
+        self.step_var.set("0")
+        self._write_text(
+            self.path_box,
+            "Paths for DFS, BFS and A* will appear here after you choose the goal.",
+        )
+        self._write_text(
+            self.decision_box,
+            [("Start and goal cleared.", "")],
+        )
+        self._refresh_grid()
 
-        # disable view buttons until new results
-        try:
-            self.view_astar_btn.config(state="disabled")
-            self.view_bfs_btn.config(state="disabled")
-            self.view_dfs_btn.config(state="disabled")
-        except Exception:
-            pass
+    def _rerun_simulation(self):
+        if not self.start or not self.goal:
+            self._set_status("Select both start and goal cells before running the simulation.")
+            return
 
-        self.create_grid()
+        self._run_simulation()
+
+    def _generate_obstacles(self):
+        obstacle_target = max(4, self.size + 1)
+        available_cells = [
+            (row, col) for row in range(self.size) for col in range(self.size)
+        ]
+        return set(random.sample(available_cells, k=min(obstacle_target, len(available_cells) - 2)))
 
     def on_click(self, row, col):
+        cell = (row, col)
+
+        if cell in self.obstacles:
+            return
+
+        if self.start is not None and self.goal is not None:
+            self._reset_points()
+
         if self.start is None:
-            self.start = (row, col)
-            self.buttons[row][col].config(bg=self.colors["accent"], fg="white", text="S")
-            self.status_var.set(f"Start selected at {self.start}. Now select the goal cell.")
+            self.start = cell
+            self.current = cell
+            self._update_selection_text()
+            self._set_status(f"Start selected at {self.start}. Now choose the goal cell.")
+            self._refresh_grid()
+            return
+
+        if cell == self.start:
+            self._set_status("Choose a different cell for the goal.")
             return
 
         if self.goal is None:
-            self.goal = (row, col)
-            self.buttons[row][col].config(bg=self.colors["goal"], fg="white", text="G")
-            self.status_var.set(f"Goal selected at {self.goal}. Running search...")
-            self.find_path()
+            self.goal = cell
+            self._update_selection_text()
+            self._run_simulation()
+
+    def _run_simulation(self):
+        self._cancel_animation()
+        self.current = self.start
+        self.last_result = None
+        self.animation_index = 0
+        self.path_history = [self.start]
+        self.decision_history = []
+        self._refresh_grid()
+        self._write_text(
+            self.decision_box,
+            [
+                ("Simulation started.\n\n", "bold"),
+                ("The decision agent will compare DFS, BFS and A* at every move.", ""),
+            ],
+        )
+        self._write_text(
+            self.path_box,
+            "Evaluating paths from the start position...",
+        )
+        self.algorithm_var.set("Evaluating routes...")
+        self.summary_var.set("Comparing DFS, BFS and A* for the first move.")
+        self.goal_var.set("Running")
+        self.step_var.set("0")
+        self._animate_path()
+
+    def _animate_path(self):
+        if self.current == self.goal:
+            self._refresh_grid()
+            self.algorithm_var.set("Goal reached")
+            self.summary_var.set("The agent reached the goal successfully.")
+            self.goal_var.set(str(self.goal))
+            self.step_var.set(str(max(len(self.path_history) - 1, 0)))
+            self._set_status(f"Navigation complete: reached {self.goal}.")
             return
 
-        self.status_var.set("Start and goal are already selected. Press Reset Board to try again.")
+        step_number = len(self.path_history) - 1
+        self.last_result = self.agent.decide_step(
+            self.current, self.goal, self.obstacles, self.size, step_number
+        )
+        self._show_results()
 
-    def find_path(self):
-        if self.start and self.goal:
-            self.stop_animation()
-            self.clear_path_markers()
-
-            path_astar = a_star(self.start, self.goal, self.obstacles, self.size)
-            path_bfs = bfs(self.start, self.goal, self.obstacles, self.size)
-            path_dfs = dfs(self.start, self.goal, self.obstacles, self.size)
-
-            self.last_paths["A*"] = path_astar
-            self.last_paths["BFS"] = path_bfs
-            self.last_paths["DFS"] = path_dfs
-
-            print("\n--- Agent Results ---")
-
-            results = []
-            result_lines = []
-
-            if path_astar:
-                risk = calculate_risk(path_astar, self.obstacles, self.size)
-                results.append(("A*", path_astar, len(path_astar), risk))
-                self.performance["A*"].append(len(path_astar))
-                print(f"A*: Length={len(path_astar)}, Risk={risk}")
-                result_lines.append(f"A*: Length {len(path_astar)} | Risk {risk}")
-                self.view_astar_btn.config(state="normal")
-            else:
-                result_lines.append("A*: Failed")
-                self.view_astar_btn.config(state="disabled")
-
-            if path_bfs:
-                risk = calculate_risk(path_bfs, self.obstacles, self.size)
-                results.append(("BFS", path_bfs, len(path_bfs), risk))
-                self.performance["BFS"].append(len(path_bfs))
-                print(f"BFS: Length={len(path_bfs)}, Risk={risk}")
-                result_lines.append(f"BFS: Length {len(path_bfs)} | Risk {risk}")
-                self.view_bfs_btn.config(state="normal")
-            else:
-                result_lines.append("BFS: Failed")
-                self.view_bfs_btn.config(state="disabled")
-
-            if path_dfs:
-                risk = calculate_risk(path_dfs, self.obstacles, self.size)
-                results.append(("DFS", path_dfs, len(path_dfs), risk))
-                self.performance["DFS"].append(len(path_dfs))
-                print(f"DFS: Length={len(path_dfs)}, Risk={risk}")
-                result_lines.append(f"DFS: Length {len(path_dfs)} | Risk {risk}")
-                self.view_dfs_btn.config(state="normal")
-            else:
-                result_lines.append("DFS: Failed")
-                self.view_dfs_btn.config(state="disabled")
-
-            self.results_var.set("\n".join(result_lines))
-            self.learning_var.set(self.get_learning_summary())
-
-            if not results:
-                print("No path found")
-                self.best_algo_var.set("Best Algorithm: No path found")
-                self.status_var.set("No algorithm found a valid path.")
-                return
-
-            best = min(results, key=lambda x: (x[2], x[3]))
-            best_algo, best_path, best_len, best_risk = best
-
-            print(f"\nBest Algorithm: {best_algo}")
-            print(f"Best Path Length: {best_len}, Risk: {best_risk}")
-
-            self.best_algo_var.set(
-                f"Best Algorithm: {best_algo}\nBest Path Length: {best_len} | Risk: {best_risk}"
+        if not self.last_result["best_path"] or self.last_result["next_move"] is None:
+            self._refresh_grid()
+            self.algorithm_var.set("No path found")
+            self.summary_var.set("All algorithms failed to produce a valid next step.")
+            self.goal_var.set("Blocked")
+            self._set_status(
+                "No valid path was found from the current position. Try resetting the points or generating a new map."
             )
-            self.status_var.set(f"{best_algo} found the best route. Animating path now...")
-            self.animate_path(best_path)
-
-    def view_path(self, algo_name):
-        """Animate the path for a specific algorithm if available."""
-        path = self.last_paths.get(algo_name)
-        if not path:
-            self.status_var.set(f"{algo_name} did not find a path.")
             return
 
-        self.stop_animation()
-        self.clear_path_markers()
-        self.status_var.set(f"Animating path from {algo_name}...")
-        self.animate_path(path)
+        next_move = self.last_result["next_move"]
+        self.current = next_move
+        self.path_history.append(next_move)
+        self.animation_index = len(self.path_history)
+        self._refresh_grid()
 
-    def clear_path_markers(self):
-        for r in range(len(self.buttons)):
-            for c in range(len(self.buttons[r])):
-                if (r, c) not in (self.start, self.goal) and (r, c) not in self.obstacles:
-                    self.buttons[r][c].config(bg=self.colors["cell"], fg=self.colors["cell_text"], text="")
+        self._set_status(
+            f"Step {step_number + 1}: moved to {self.current} using {self.last_result['best_algorithm']}."
+        )
+        self.step_var.set(str(step_number + 1))
 
-    def get_learning_summary(self):
-        lines = ["Learning Summary:"]
-        for algo, values in self.performance.items():
-            if values:
-                avg = sum(values) / len(values)
-                lines.append(f"{algo}: avg {avg:.2f}")
-            else:
-                lines.append(f"{algo}: -")
-        return "\n".join(lines)
+        self.animation_job = self.root.after(450, self._animate_path)
 
-    def stop_animation(self):
+    def _cancel_animation(self):
         if self.animation_job is not None:
             self.root.after_cancel(self.animation_job)
             self.animation_job = None
 
-    def animate_path(self, path, index=0):
-        if index < len(path):
-            row, col = path[index]
+    def _refresh_grid(self):
+        visited_path = self.path_history[:]
 
-            if (row, col) not in (self.start, self.goal):
-                self.buttons[row][col].config(bg=self.colors["path"], fg="white", text="*")
+        for row in range(self.size):
+            for col in range(self.size):
+                cell = (row, col)
+                button = self.buttons[row][col]
 
-            self.animation_job = self.root.after(
-                400, lambda: self.animate_path(path, index + 1)
+                color = self.CELL_COLORS["empty"]
+                state = "normal"
+
+                if cell in self.obstacles:
+                    color = self.CELL_COLORS["obstacle"]
+                    state = "disabled"
+                elif cell == self.start:
+                    color = self.CELL_COLORS["start"]
+                elif cell == self.goal:
+                    color = self.CELL_COLORS["goal"]
+                elif cell in visited_path:
+                    color = self.CELL_COLORS["trail"]
+
+                if cell == self.current and cell not in {self.start, self.goal}:
+                    color = self.CELL_COLORS["current"]
+
+                button.config(
+                    bg=color,
+                    state=state,
+                    disabledforeground="#FFFFFF",
+                    fg="#FFFFFF" if color in {
+                        self.CELL_COLORS["obstacle"],
+                        self.CELL_COLORS["start"],
+                        self.CELL_COLORS["goal"],
+                    } else "#0F172A",
+                    activeforeground="#0F172A",
+                )
+
+    def _show_results(self):
+        paths = self.last_result["paths"]
+        path_lines = []
+
+        for algorithm in ("DFS", "BFS", "A*"):
+            path = paths.get(algorithm)
+            if path:
+                path_lines.append(
+                    f"{algorithm} from {self.last_result['current']} ({len(path) - 1} step(s)):\n{self._format_path(path)}"
+                )
+            else:
+                path_lines.append(
+                    f"{algorithm} from {self.last_result['current']}:\nNo valid path found."
+                )
+
+        self._write_text(self.path_box, "\n\n".join(path_lines))
+        self._update_current_decision()
+
+        step_log_parts = self._format_step_log()
+        self.decision_history.extend(step_log_parts)
+        self.decision_history.append(("\n", ""))
+        self._write_text(self.decision_box, self.decision_history)
+
+    def _update_current_decision(self):
+        best_algorithm = self.last_result["best_algorithm"]
+        next_move = self.last_result["next_move"]
+        current = self.last_result["current"]
+
+        if best_algorithm and next_move is not None:
+            self.algorithm_var.set(f"{best_algorithm} selected")
+            self.summary_var.set(
+                f"Step {self.last_result['step_number'] + 1}: move from {current} to {next_move}."
             )
         else:
-            self.animation_job = None
-            self.status_var.set("Path animation complete. Press Reset Board to try another run.")
+            self.algorithm_var.set("No path found")
+            self.summary_var.set("No valid next move is available from the current state.")
+
+    def _format_step_log(self):
+        parts = []
+        step_number = self.last_result["step_number"] + 1
+        current = self.last_result["current"]
+        best_algorithm = self.last_result["best_algorithm"]
+        next_move = self.last_result["next_move"]
+
+        parts.append((f"Step {step_number}\n", "bold"))
+        parts.append((f"Current cell: {current}\n", ""))
+        parts.append((f"Chosen algorithm: {best_algorithm or 'none'}\n", ""))
+        parts.append((f"Next move: {next_move if next_move is not None else 'no valid move'}\n", ""))
+        parts.append(("Decision details:\n", "bold"))
+
+        for detail in self.last_result["step_log"][1:]:
+            parts.append((f"{detail}\n", ""))
+
+        return parts
+
+    def _update_selection_text(self):
+        start_text = str(self.start) if self.start else "not selected"
+        goal_text = str(self.goal) if self.goal else "not selected"
+        self.selection_var.set(f"Start: {start_text}\nGoal: {goal_text}")
+
+    def _set_status(self, message):
+        self.status_var.set(message)
+
+    @staticmethod
+    def _format_path(path):
+        return " -> ".join(f"({row},{col})" for row, col in path)
+
+    @staticmethod
+    def _write_text(widget, content):
+        widget.config(state="normal")
+        widget.delete("1.0", tk.END)
+
+        if isinstance(content, list):
+            for text, tag in content:
+                widget.insert(tk.END, text, tag if tag else "")
+        else:
+            widget.insert(tk.END, content)
+
+        widget.config(state="disabled")
+        widget.see(tk.END)
